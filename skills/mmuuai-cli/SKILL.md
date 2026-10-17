@@ -1,6 +1,6 @@
 ---
 name: mmuuai-cli
-description: 通过已安装的 MMUUAI CLI 查询并调用 MMUUAI 的模型、技能、工作流和创作预设；媒体生成、视频下载解析和音频处理使用平台资源，剧本歌词等纯文字先读取免费预设后由当前 Agent 写作。优先复用已加载的原生 MMUUAI 工具，原生工具未加载时可用 CLI；普通问答和代码工作不必调用。
+description: 通过已安装的 MMUUAI CLI 查询并调用 MMUUAI 的模型、技能、工作流、创作预设、平台知识和获准访问的本人知识与资产；媒体生成、视频下载解析和音频处理使用平台资源，剧本歌词等纯文字先读取免费预设后由当前 Agent 写作。优先复用已加载的原生 MMUUAI 工具，原生工具未加载时可用 CLI；普通问答和代码工作不必调用。
 ---
 
 # MMUUAI CLI
@@ -17,6 +17,7 @@ mmuuai call mmuu_catalog --json-file arguments.json
 
 - 没有登录时让用户执行 `mmuuai login`，在 MMUUAI 官方授权页登录；不索取密码、Cookie 或 Token。
 - 先查当前目录和本次报价。资源 ID、版本、输入参数和后台默认模型均实时读取，不从旧对话猜测；不在已返回的本次报价上再次手工打折。
+- 用 `mmuuai call mmuu_assets` 查询公共或当前工作区本人的资产，`call mmuu_platform_knowledge` 免费读取当前已发布的平台知识与案例；沿返回分页继续，资产 `inputFile` 可直接用于任务输入。私人知识由同一接口检查当前授权，个人空间 API Key 与 OAuth 均按其实际权限使用。
 - 写剧本、歌词或提示词时先用 `mmuu_prompts` 读取匹配公开预设，再由当前 Agent 写作，不自动调用本站付费 LLM。
 - `run` 已包含首次结果领取与自动保存；不要随后再调用首次领取工具。直接调用 `mmuu_get_result` 也由 CLI 保存并返回文件路径。
 - 保存失败时优先对同一任务执行 `result` 补存。请求未知或 `reconciling` 时查询原任务，不重新生成，不自动换幂等键。

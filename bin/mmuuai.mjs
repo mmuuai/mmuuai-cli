@@ -23136,7 +23136,7 @@ async function loadConnection({ endpoint, configDir, apiKey, lazy: lazy2 = false
     authProvider = binding.authProvider;
     fetchFn = binding.fetch;
   }
-  const client = new Client({ name: "MMUUAI CLI", version: "1.0.1" }, { capabilities: {} });
+  const client = new Client({ name: "MMUUAI CLI", version: "1.0.2" }, { capabilities: {} });
   let connecting, closed = false;
   const connect = () => {
     if (closed) return Promise.reject(fail3("MMUU_AUTH_CONNECTION_CLOSED"));
@@ -24205,7 +24205,7 @@ import { spawnSync } from "node:child_process";
 // plugins/mmuuai-cli/package.json
 var package_default = {
   name: "@mmuuai/cli",
-  version: "1.0.1",
+  version: "1.0.2",
   description: "MMUUAI \u547D\u4EE4\u884C\u5BA2\u6237\u7AEF\uFF1A\u8FDE\u63A5\u8D26\u53F7\uFF0C\u67E5\u8BE2\u4E0E\u8C03\u7528\u5E73\u53F0\u8D44\u6E90\u5E76\u4FDD\u5B58\u7ED3\u679C",
   private: true,
   type: "module",
