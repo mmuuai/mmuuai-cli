@@ -22987,6 +22987,19 @@ function createSessionCoordinator({ endpoint, store }) {
   };
 }
 
+// plugins/mmuuai-cli/package.json
+var package_default = {
+  name: "@mmuuai/cli",
+  version: "1.0.11",
+  description: "MMUUAI \u547D\u4EE4\u884C\u5BA2\u6237\u7AEF\uFF1A\u8FDE\u63A5\u8D26\u53F7\uFF0C\u67E5\u8BE2\u4E0E\u8C03\u7528\u5E73\u53F0\u8D44\u6E90\u5E76\u4FDD\u5B58\u7ED3\u679C",
+  private: true,
+  type: "module",
+  bin: { mmuuai: "./bin/mmuuai.mjs" },
+  engines: { node: ">=24.16.0" },
+  files: ["bin", "skills", "README.md", "THIRD_PARTY_NOTICES.md"],
+  homepage: "https://mmuu.ai/plugin"
+};
+
 // plugins/mmuuai-cli/src/auth.mjs
 var DEFAULT_ENDPOINT = "https://api.mmuu.ai/mcp";
 var fail3 = (code) => Object.assign(new Error(code), { code });
@@ -23137,7 +23150,7 @@ async function loadConnection({ endpoint, configDir, apiKey, lazy: lazy2 = false
     authProvider = binding.authProvider;
     fetchFn = binding.fetch;
   }
-  const client = new Client({ name: "MMUUAI CLI", version: "1.0.6" }, { capabilities: {} });
+  const client = new Client({ name: "MMUUAI CLI", version: package_default.version }, { capabilities: {} });
   let connecting, closed = false;
   const connect = () => {
     if (closed) return Promise.reject(fail3("MMUU_AUTH_CONNECTION_CLOSED"));
@@ -23469,8 +23482,12 @@ async function deliverResult({
 // plugins/mmuuai-cli/src/upload-helper.mjs
 import { spawn as spawn3 } from "node:child_process";
 var MAX_RESPONSE_BYTES = 16384;
-var PYTHON_CODE = `import importlib.util,json,sys
+var PYTHON_CODE = `import importlib.util,json,sys,os
 try:
+    if not os.path.isfile(sys.argv[1]):
+        unavailable=RuntimeError("helper unavailable")
+        unavailable.code="MMUU_UPLOAD_HELPER_FILE_UNAVAILABLE"
+        raise unavailable
     spec=importlib.util.spec_from_file_location("mmuu_cli_upload",sys.argv[1])
     helper=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helper)
@@ -23479,8 +23496,9 @@ try:
     print(json.dumps(result,ensure_ascii=False,separators=(",",":")))
 except BaseException as error:
     code=getattr(error,"code","")
-    allowed={"MMUU_UPLOAD_URL_INVALID","MMUU_UPLOAD_LOCAL_FILE_UNAVAILABLE","MMUU_UPLOAD_HTTP_FAILED","MMUU_UPLOAD_TRANSPORT_UNKNOWN","MMUU_UPLOAD_RESPONSE_INVALID"}
+    allowed={"MMUU_UPLOAD_URL_INVALID","MMUU_UPLOAD_LOCAL_FILE_UNAVAILABLE","MMUU_UPLOAD_HTTP_FAILED","MMUU_UPLOAD_TRANSPORT_UNKNOWN","MMUU_UPLOAD_RESPONSE_INVALID","MMUU_UPLOAD_HELPER_FILE_UNAVAILABLE"}
     detail={"code":code if code in allowed else "MMUU_UPLOAD_UNEXPECTED_FAILURE"}
+    if code=="MMUU_UPLOAD_HELPER_FILE_UNAVAILABLE": detail["uploadAttempted"]=False
     for field in ("transport_reason","http_status","request_id"):
         value=getattr(error,field,None)
         if value is not None: detail[{"transport_reason":"transportReason","http_status":"httpStatus","request_id":"requestId"}[field]]=value
@@ -23545,7 +23563,8 @@ function runUploadHelper({ pythonCommand, scriptPath, input, spawnImpl = spawn3 
             "HTTP_FAILED",
             "TRANSPORT_UNKNOWN",
             "RESPONSE_INVALID",
-            "UNEXPECTED_FAILURE"
+            "UNEXPECTED_FAILURE",
+            "HELPER_FILE_UNAVAILABLE"
           ]);
           const suffix = response?.error?.code?.replace?.(/^MMUU_UPLOAD_/, "");
           return finish(
@@ -23571,6 +23590,7 @@ function runUploadHelper({ pythonCommand, scriptPath, input, spawnImpl = spawn3 
 function uploadFailureDetails(error2) {
   if (typeof error2?.code !== "string" || !/^MMUU_(?:CLI_)?UPLOAD_/.test(error2.code)) return {};
   const details = {};
+  if (/HELPER_FILE_UNAVAILABLE$/.test(error2.code) && error2.uploadAttempted === false) details.uploadAttempted = false;
   if ((/* @__PURE__ */ new Set(["timeout", "tls_verification", "connection_refused", "name_resolution", "connection_reset", "network_error"])).has(error2.transportReason))
     details.transportReason = error2.transportReason;
   if (Number.isInteger(error2.httpStatus) && error2.httpStatus >= 100 && error2.httpStatus <= 599) details.httpStatus = error2.httpStatus;
@@ -23658,7 +23678,7 @@ async function uploadLocalFile({
   mediaKind = "image",
   mimeType,
   endpoint,
-  pythonCommand = process.platform === "win32" ? "python" : "python3",
+  pythonCommand = process.env.MMUUAI_PYTHON || (process.platform === "win32" ? "python" : "python3"),
   spawnImpl,
   scriptPath = fileURLToPath(new URL("./upload-file.py", import.meta.url))
 } = {}) {
@@ -24162,6 +24182,14 @@ import { spawn as spawn4 } from "node:child_process";
 import { isAbsolute as isAbsolute2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var SCRIPT = fileURLToPath2(new URL("./save-results.py", import.meta.url));
+var PYTHON_ENTRY = `import json,os,runpy,sys
+script=sys.argv[1]
+if not os.path.isfile(script):
+    print(json.dumps({"status":"failed","code":"MMUU_SAVE_BRIDGE_HELPER_FILE_UNAVAILABLE","resultRefetchAttempted":False}))
+    sys.exit(1)
+sys.path.insert(0,os.path.dirname(script))
+sys.argv=sys.argv[1:]
+runpy.run_path(script,run_name="__main__")`;
 var TASK_ID = /^tsk_[A-Za-z0-9_-]{16,80}$/;
 var CODE = /^MMUU_SAVE_[A-Z0-9_]+$/;
 var TYPES = /* @__PURE__ */ new Set(["text", "image", "audio", "video", "file"]);
@@ -24270,11 +24298,13 @@ async function saveReceivedResult(payload, options = {}) {
     };
     try {
       child = spawn4(
-        pythonCommand ?? (process.platform === "win32" ? "python" : "python3"),
+        pythonCommand ?? (process.env.MMUUAI_PYTHON || (process.platform === "win32" ? "python" : "python3")),
         [
           "-X",
           "utf8",
           "-B",
+          "-c",
+          PYTHON_ENTRY,
           SCRIPT,
           ...outputDir === void 0 ? [] : ["--output-dir", outputDir]
         ],
@@ -24323,21 +24353,6 @@ async function saveReceivedResult(payload, options = {}) {
 
 // plugins/mmuuai-cli/src/main.mjs
 import { spawnSync } from "node:child_process";
-
-// plugins/mmuuai-cli/package.json
-var package_default = {
-  name: "@mmuuai/cli",
-  version: "1.0.6",
-  description: "MMUUAI \u547D\u4EE4\u884C\u5BA2\u6237\u7AEF\uFF1A\u8FDE\u63A5\u8D26\u53F7\uFF0C\u67E5\u8BE2\u4E0E\u8C03\u7528\u5E73\u53F0\u8D44\u6E90\u5E76\u4FDD\u5B58\u7ED3\u679C",
-  private: true,
-  type: "module",
-  bin: { mmuuai: "./bin/mmuuai.mjs" },
-  engines: { node: ">=24.16.0" },
-  files: ["bin", "skills", "README.md", "THIRD_PARTY_NOTICES.md"],
-  homepage: "https://mmuu.ai/plugin"
-};
-
-// plugins/mmuuai-cli/src/main.mjs
 if ((process.env.HTTPS_PROXY || process.env.HTTP_PROXY) && !process.execArgv.includes("--use-env-proxy")) {
   const child = spawnSync(process.execPath, ["--use-env-proxy", process.argv[1], ...process.argv.slice(2)], {
     stdio: "inherit",
@@ -24398,7 +24413,8 @@ try {
   const messages = {
     MMUU_AUTH_LOGIN_REQUIRED: "\u8BF7\u5148\u6267\u884C mmuuai login\uFF0C\u5728 MMUUAI \u6388\u6743\u9875\u8FDE\u63A5\u8D26\u53F7\u3002",
     MMUU_AUTH_REVOKE_FAILED: "\u672C\u673A\u51ED\u636E\u5DF2\u6E05\u7406\uFF0C\u8FDC\u7AEF\u64A4\u9500\u5C1A\u672A\u786E\u8BA4\uFF1B\u53EF\u5230 API\u5BC6\u94A5\u9875\u9762\u64A4\u9500\u8FDE\u63A5\u3002",
-    MMUU_AUTH_TIMEOUT: "\u767B\u5F55\u7B49\u5F85\u5DF2\u7ED3\u675F\u3002"
+    MMUU_AUTH_TIMEOUT: "\u767B\u5F55\u7B49\u5F85\u5DF2\u7ED3\u675F\u3002",
+    MMUU_CLI_UPLOAD_HELPER_FILE_UNAVAILABLE: "\u5F53\u524D Python \u65E0\u6CD5\u8BFB\u53D6 CLI \u5B89\u88C5\u76EE\u5F55\uFF1B\u8BF7\u7528 MMUUAI_PYTHON \u6307\u5B9A\u53EF\u8BBF\u95EE\u8BE5\u76EE\u5F55\u7684 Python \u7EDD\u5BF9\u8DEF\u5F84\u3002\u672C\u6B21\u672A\u53D1\u9001\u6587\u4EF6\u3002"
   };
   print({
     error: { code, ...uploadFailureDetails(error2), ...messages[code] ? { message: messages[code] } : {} },

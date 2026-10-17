@@ -1,11 +1,13 @@
 ---
 name: mmuuai-cli
-description: 通过已安装的 MMUUAI CLI 查询并调用 MMUUAI 的模型、技能、工作流、创作预设、平台知识和获准访问的本人知识与资产；媒体生成、视频下载解析和音频处理使用平台资源，剧本歌词等纯文字先读取免费预设后由当前 Agent 写作。优先复用已加载的原生 MMUUAI 工具，原生工具未加载时可用 CLI；普通问答和代码工作不必调用。
+description: 通过 MMUUAI CLI 生成处理图片、视频、音乐、语音，下载解析视频和采集视频案例；写文章、剧本、歌词、广告文案和提示词时，主动读取免费公开预设与平台知识，由当前 Agent 创作。支持查询平台资源和获准访问的本人资料，优先复用已加载的原生工具；普通问答和代码工作不必调用。
 ---
 
 # MMUUAI CLI
 
-这是独立命令行安装方式。先运行 `mmuuai --help` 确认实际可用命令，使用前读取 [平台使用规则](references/platform-rules.md)。平台规则由与插件相同的源文件生成，模型选择、会员权益、算力单位、权限和未知任务恢复规则一致。
+这是独立命令行入口。使用前必须读取 [平台使用规则](references/platform-rules.md)，该文件在打包时从插件主 Skill 生成；本文件只补充命令行操作，不另写一套创作、权限或提问规则。
+
+选定非语言模型、技能或工作流后，按平台规则先取得同资源、同版本的 `usageGuide/usageContract`，再准备问题与请求。本轮已完整读取则复用；读到规范不等于用户已批准执行。
 
 将平台规则中的每个 `mmuu_*` 工具调用转换为：
 
@@ -13,19 +15,15 @@ description: 通过已安装的 MMUUAI CLI 查询并调用 MMUUAI 的模型、�
 mmuuai call mmuu_catalog --json-file arguments.json
 ```
 
-参数 JSON 原样传递；也可通过 `--json-file -` 从标准输入读取。优先使用 `catalog`、`quote`、`create`、`wait`、`confirmation`、`confirm`、`result` 等简短命令，实际参数以当前 `--help` 为准。模糊创作想法先给 2～4 个方向、集中问 1～2 个关键问题；清晰需求直接准备方案。两者都必须在提交前展示最终提示词、附件、模型池可见参数及配置中文名称和报价，等用户确认后再提交，不能把方向选择当作执行批准。
+先运行 `mmuuai --help` 确认当前命令。参数 JSON 原样传递，也可通过 `--json-file -` 从标准输入读取。优先使用 `catalog`、`quote`、`create`、`wait`、`confirmation`、`confirm`、`result` 等简短命令。
 
 - 没有登录时让用户执行 `mmuuai login`，在 MMUUAI 官方授权页登录；不索取密码、Cookie 或 Token。
-- 先查当前目录和本次报价。资源 ID、版本、输入参数和后台默认模型均实时读取，不从旧对话猜测；不在已返回的本次报价上再次手工打折。
-- 用 `mmuuai call mmuu_assets` 查询公共或当前工作区本人的资产，`call mmuu_platform_knowledge` 免费读取当前已发布的平台知识与案例；沿返回分页继续，资产 `inputFile` 可直接用于任务输入。私人知识由同一接口检查当前授权，个人空间 API Key 与 OAuth 均按其实际权限使用。
-- 写剧本、歌词或提示词时先用 `mmuu_prompts` 读取匹配公开预设，再由当前 Agent 写作，不自动调用本站付费 LLM。
-- 技能/工作流提交前让用户选择“每一步查看”或“一次性执行完”，分别传顶层 `workflowMode=step_by_step/automatic`；不替用户默认选择。逐步模式 `wait` 返回暂停及下一步完整确认清单，先展示上步真实结果和本步所有条目，等用户批准后 `confirm`，再 `wait` 原任务，不能循环自动确认。返回清单已完整时直接复用；不要重读并重复保存。服务未公布这些能力时说明需更新，不悄悄改为自动模式。
+- `catalog --kind model|skill|workflow --query 关键词` 搜索；用上述 `call mmuu_catalog` 传 `{kind,resourceId}` 读取详情。其他资料与资产工具按同样方式调用，参数以实际工具 Schema 为准。
+- `quote` 准备最终清单，用户批准同版本、同输入后才 `create`。工作流顶层 `workflowMode` 使用用户所选的 `step_by_step/automatic`；独立模型不加工作流模式。
+- `wait` 遇到 `awaiting_confirmation` 时已返回下一步完整清单；按平台规则展示并取得本步批准后 `confirm`，再 `wait` 原任务。回执完整时不重复查询或保存前步；不循环自动批准。
 - `run` 仅用于已经批准的完整请求，已包含首次结果领取与自动保存；不要随后再调用首次领取工具。直接调用 `mmuu_get_result` 也由 CLI 保存并返回文件路径。
 - 保存失败时优先对同一任务执行 `result` 补存。请求未知或 `reconciling` 时查询原任务，不重新生成，不自动换幂等键。
+- Python 可通过 `MMUUAI_PYTHON` 指定真实绝对路径。若返回 `MMUU_CLI_UPLOAD_HELPER_FILE_UNAVAILABLE` 且 `uploadAttempted=false`，该 Python 看不到安装目录，尚未发送文件；用宿主依赖工具提供的可用 Python 配置后再上传。保存器出现 `MMUU_SAVE_BRIDGE_HELPER_FILE_UNAVAILABLE` 时同样切换 Python，再对原任务 `result` 补存，不重复领取或生成。只在当前 CLI 进程环境设置，不改全局 Python 或账号授权。
 - 结果默认自动保存到系统下载目录/MMUUAI/，用户指定其他目录时使用 `--output-dir`。通过 CLI 回执中的绝对路径展示媒体或读取文字，避免将大 base64 放进对话。
-- 正常成功后直接展示结果，不重复添加“原图已保存”“费用已结算”等尾注。费用对用户用算力，例如 30000 microcredits 是 0.03 算力。
-- 模型默认与技能推荐只用于优先选择，未被选择的其他可见资源仍可用；用户点名优先。泛指技能工作流时查 `skill` 和 `workflow` 两类，不能把其中一类为空说成平台没有能力。
-- 按完整目标选择模型或组合能力：例如视频链接加人物照片、要求保留动作并换人时，先查匹配的动作模仿/人物替换技能工作流；找到匹配组合就整体调用，不在宿主重新拆步骤，也不先套默认视频模型。仅在确实没有匹配组合时再用实际模型能力完成或最少步骤组合。
-- 音频/视频使用宿主媒体嵌入格式显示实际绝对路径；内嵌播放未确认支持时，自动用宿主预览工具打开主结果。Codex 的 `open_in_codex` 使用 `target:{type:"file",path:真实绝对路径}`；没有预览工具时如实提供可用媒体，不伪造已打开。
 
 不要把当前软件不支持的插件或 Skill 安装方式说成已完成；CLI 连接不等于宿主已经加载了原生 MCP 工具。
