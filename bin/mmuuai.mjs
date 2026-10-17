@@ -23136,7 +23136,7 @@ async function loadConnection({ endpoint, configDir, apiKey, lazy: lazy2 = false
     authProvider = binding.authProvider;
     fetchFn = binding.fetch;
   }
-  const client = new Client({ name: "MMUUAI CLI", version: "1.0.2" }, { capabilities: {} });
+  const client = new Client({ name: "MMUUAI CLI", version: "1.0.3" }, { capabilities: {} });
   let connecting, closed = false;
   const connect = () => {
     if (closed) return Promise.reject(fail3("MMUU_AUTH_CONNECTION_CLOSED"));
@@ -23465,35 +23465,9 @@ async function deliverResult({
   );
 }
 
-// plugins/mmuuai-cli/src/upload.mjs
+// plugins/mmuuai-cli/src/upload-helper.mjs
 import { spawn as spawn3 } from "node:child_process";
-import { stat } from "node:fs/promises";
-import { basename, extname, resolve as resolve3 } from "node:path";
-import { fileURLToPath } from "node:url";
 var MAX_RESPONSE_BYTES = 16384;
-var KINDS = /* @__PURE__ */ new Set(["image", "audio", "video", "file"]);
-var MIME_TYPES = {
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".gif": "image/gif",
-  ".avif": "image/avif",
-  ".svg": "image/svg+xml",
-  ".bmp": "image/bmp",
-  ".mp3": "audio/mpeg",
-  ".wav": "audio/wav",
-  ".m4a": "audio/mp4",
-  ".aac": "audio/aac",
-  ".flac": "audio/flac",
-  ".ogg": "audio/ogg",
-  ".mp4": "video/mp4",
-  ".mov": "video/quicktime",
-  ".webm": "video/webm",
-  ".mkv": "video/x-matroska",
-  ".pdf": "application/pdf",
-  ".txt": "text/plain"
-};
 var PYTHON_CODE = `import importlib.util,json,sys
 try:
     spec=importlib.util.spec_from_file_location("mmuu_cli_upload",sys.argv[1])
@@ -23505,23 +23479,16 @@ try:
 except BaseException as error:
     code=getattr(error,"code","")
     allowed={"MMUU_UPLOAD_URL_INVALID","MMUU_UPLOAD_LOCAL_FILE_UNAVAILABLE","MMUU_UPLOAD_HTTP_FAILED","MMUU_UPLOAD_TRANSPORT_UNKNOWN","MMUU_UPLOAD_RESPONSE_INVALID"}
-    print(json.dumps({"error":{"code":code if code in allowed else "MMUU_UPLOAD_UNEXPECTED_FAILURE"}}))
+    detail={"code":code if code in allowed else "MMUU_UPLOAD_UNEXPECTED_FAILURE"}
+    for field in ("transport_reason","http_status","request_id"):
+        value=getattr(error,field,None)
+        if value is not None: detail[{"transport_reason":"transportReason","http_status":"httpStatus","request_id":"requestId"}[field]]=value
+    print(json.dumps({"error":detail}))
     sys.exit(1)
 `;
-var fail5 = (code) => Object.assign(new Error(code), { code, retryAttempted: false });
-var record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-function apiOrigin(endpoint) {
-  if (endpoint === void 0) return "https://api.mmuu.ai";
-  try {
-    const value = new URL(endpoint);
-    if (value.username || value.password || value.search || value.hash)
-      throw new Error();
-    return value.origin;
-  } catch {
-    throw fail5("MMUU_CLI_UPLOAD_ENDPOINT_INVALID");
-  }
-}
-function runHelper({ pythonCommand, scriptPath, input, spawnImpl }) {
+var uploadFailure = (code, details = {}) => Object.assign(new Error(code), { code, retryAttempted: false, ...details });
+var fail5 = uploadFailure;
+function runUploadHelper({ pythonCommand, scriptPath, input, spawnImpl = spawn3 }) {
   return new Promise((resolveResult, reject) => {
     let child, settled = false, bytes = 0, chunks = [];
     const finish = (error2, result3) => {
@@ -23582,7 +23549,8 @@ function runHelper({ pythonCommand, scriptPath, input, spawnImpl }) {
           const suffix = response?.error?.code?.replace?.(/^MMUU_UPLOAD_/, "");
           return finish(
             fail5(
-              safeCodes.has(suffix) ? `MMUU_CLI_UPLOAD_${suffix}` : "MMUU_CLI_UPLOAD_TRANSPORT_UNKNOWN"
+              safeCodes.has(suffix) ? `MMUU_CLI_UPLOAD_${suffix}` : "MMUU_CLI_UPLOAD_TRANSPORT_UNKNOWN",
+              uploadFailureDetails({ code: "MMUU_CLI_UPLOAD_HELPER_FAILURE", ...response?.error })
             )
           );
         }
@@ -23599,12 +23567,61 @@ function runHelper({ pythonCommand, scriptPath, input, spawnImpl }) {
     }
   });
 }
+function uploadFailureDetails(error2) {
+  if (typeof error2?.code !== "string" || !/^MMUU_(?:CLI_)?UPLOAD_/.test(error2.code)) return {};
+  const details = {};
+  if ((/* @__PURE__ */ new Set(["timeout", "tls_verification", "connection_refused", "name_resolution", "connection_reset", "network_error"])).has(error2.transportReason))
+    details.transportReason = error2.transportReason;
+  if (Number.isInteger(error2.httpStatus) && error2.httpStatus >= 100 && error2.httpStatus <= 599) details.httpStatus = error2.httpStatus;
+  if (typeof error2.requestId === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(error2.requestId)) details.requestId = error2.requestId;
+  return details;
+}
+
+// plugins/mmuuai-cli/src/upload.mjs
+import { stat } from "node:fs/promises";
+import { basename, extname, resolve as resolve3 } from "node:path";
+import { fileURLToPath } from "node:url";
+var KINDS = /* @__PURE__ */ new Set(["image", "audio", "video", "file"]);
+var record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var MIME_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".avif": "image/avif",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".m4a": "audio/mp4",
+  ".aac": "audio/aac",
+  ".flac": "audio/flac",
+  ".ogg": "audio/ogg",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".mkv": "video/x-matroska",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain"
+};
+function apiOrigin(endpoint) {
+  if (endpoint === void 0) return "https://api.mmuu.ai";
+  try {
+    const value = new URL(endpoint);
+    if (value.username || value.password || value.search || value.hash)
+      throw new Error();
+    return value.origin;
+  } catch {
+    throw uploadFailure("MMUU_CLI_UPLOAD_ENDPOINT_INVALID");
+  }
+}
 function validatedReceipt(value, expected) {
   const file = value?.file;
   if (!record3(value) || !record3(file) || !record3(file.source) || file.source.type !== "upload" || typeof file.source.ref !== "string" || file.source.ref.length > 4096 || !/^upl_[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+$/.test(
     file.source.ref
   ) || file.fileName !== expected.fileName || file.mimeType !== expected.mimeType || file.mediaKind !== expected.mediaKind || file.parameter !== expected.parameter || value.byteSize !== expected.byteSize || typeof value.expiresAt !== "string" || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value.expiresAt) || !Number.isFinite(Date.parse(value.expiresAt)))
-    throw fail5("MMUU_CLI_UPLOAD_RESPONSE_INVALID");
+    throw uploadFailure("MMUU_CLI_UPLOAD_RESPONSE_INVALID");
   return {
     file: {
       source: { type: "upload", ref: file.source.ref },
@@ -23625,11 +23642,11 @@ async function uploadLocalFile({
   mimeType,
   endpoint,
   pythonCommand = process.platform === "win32" ? "python" : "python3",
-  spawnImpl = spawn3,
+  spawnImpl,
   scriptPath = fileURLToPath(new URL("./upload-file.py", import.meta.url))
 } = {}) {
   if (typeof filePath !== "string" || !filePath || !KINDS.has(mediaKind) || typeof parameter !== "string" || !parameter || typeof pythonCommand !== "string" || !pythonCommand || typeof scriptPath !== "string" || !scriptPath || typeof client?.callTool !== "function")
-    throw fail5("MMUU_CLI_UPLOAD_ARGUMENTS_INVALID");
+    throw uploadFailure("MMUU_CLI_UPLOAD_ARGUMENTS_INVALID");
   let size;
   const absolutePath = resolve3(filePath), fileName = basename(absolutePath), apiBaseUrl = apiOrigin(endpoint);
   try {
@@ -23638,11 +23655,11 @@ async function uploadLocalFile({
       throw new Error();
     size = info.size;
   } catch {
-    throw fail5("MMUU_CLI_UPLOAD_LOCAL_FILE_UNAVAILABLE");
+    throw uploadFailure("MMUU_CLI_UPLOAD_LOCAL_FILE_UNAVAILABLE");
   }
   mimeType ??= MIME_TYPES[extname(fileName).toLowerCase()] ?? "application/octet-stream";
   if (typeof mimeType !== "string" || !mimeType || mimeType.length > 120 || fileName.length > 180)
-    throw fail5("MMUU_CLI_UPLOAD_ARGUMENTS_INVALID");
+    throw uploadFailure("MMUU_CLI_UPLOAD_ARGUMENTS_INVALID");
   let prepared;
   try {
     prepared = await client.callTool({
@@ -23650,13 +23667,13 @@ async function uploadLocalFile({
       arguments: { fileName, mimeType, mediaKind, byteSize: size }
     });
   } catch {
-    throw fail5("MMUU_CLI_UPLOAD_PREPARE_UNKNOWN");
+    throw uploadFailure("MMUU_CLI_UPLOAD_PREPARE_UNKNOWN");
   }
-  if (prepared?.isError) throw fail5("MMUU_CLI_UPLOAD_PREPARE_FAILED");
+  if (prepared?.isError) throw uploadFailure("MMUU_CLI_UPLOAD_PREPARE_FAILED");
   const ticket = prepared?.structuredContent;
   if (!record3(ticket) || typeof ticket.uploadUrl !== "string" || !ticket.uploadUrl || ticket.uploadUrl.length > 8192)
-    throw fail5("MMUU_CLI_UPLOAD_PREPARE_RESPONSE_INVALID");
-  const response = await runHelper({
+    throw uploadFailure("MMUU_CLI_UPLOAD_PREPARE_RESPONSE_INVALID");
+  const response = await runUploadHelper({
     pythonCommand,
     scriptPath,
     spawnImpl,
@@ -24205,7 +24222,7 @@ import { spawnSync } from "node:child_process";
 // plugins/mmuuai-cli/package.json
 var package_default = {
   name: "@mmuuai/cli",
-  version: "1.0.2",
+  version: "1.0.3",
   description: "MMUUAI \u547D\u4EE4\u884C\u5BA2\u6237\u7AEF\uFF1A\u8FDE\u63A5\u8D26\u53F7\uFF0C\u67E5\u8BE2\u4E0E\u8C03\u7528\u5E73\u53F0\u8D44\u6E90\u5E76\u4FDD\u5B58\u7ED3\u679C",
   private: true,
   type: "module",
@@ -24276,7 +24293,11 @@ try {
     MMUU_AUTH_REVOKE_FAILED: "\u672C\u673A\u51ED\u636E\u5DF2\u6E05\u7406\uFF0C\u8FDC\u7AEF\u64A4\u9500\u5C1A\u672A\u786E\u8BA4\uFF1B\u53EF\u5230 API\u5BC6\u94A5\u9875\u9762\u64A4\u9500\u8FDE\u63A5\u3002",
     MMUU_AUTH_TIMEOUT: "\u767B\u5F55\u7B49\u5F85\u5DF2\u7ED3\u675F\u3002"
   };
-  print({ error: { code, ...messages[code] ? { message: messages[code] } : {} }, ...error2?.localCleared === true ? { localCleared: true } : {} });
+  print({
+    error: { code, ...uploadFailureDetails(error2), ...messages[code] ? { message: messages[code] } : {} },
+    ...error2?.retryAttempted === false ? { retryAttempted: false } : {},
+    ...error2?.localCleared === true ? { localCleared: true } : {}
+  });
   process.exitCode = 1;
 } finally {
   await connection?.close().catch(() => void 0);

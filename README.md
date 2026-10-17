@@ -4,6 +4,8 @@
 
 需要 Node.js 24.16 或更高版本，以及 Python 3（复用平台插件的上传、保存与下载命名脚本）。安装包已包含 MCP 官方 SDK，不需要 MMUUAI 业务源码，也不安装额外运行依赖。
 
+上传与 MCP 连接使用同一套显式代理环境设置（`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`），不另外启用 Windows 注册表代理，不修改系统全局设置。网络失败会附安全的 `transportReason`；已有 HTTP 响应时可附 `httpStatus` 和 `requestId`，均不包含一次性上传地址或凭据。未知上传不会自动重试。
+
 ## 安装
 
 解压官方 ZIP 到持久目录，在该目录执行 `npm install --global .`，再执行 `mmuuai --version`。请保留解压目录；本地 npm 包可能通过链接安装。若系统 npm 全局目录无写入权限，使用当前用户的 npm prefix，不需要修改系统安全设置。
