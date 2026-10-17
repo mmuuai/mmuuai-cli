@@ -1,0 +1,11 @@
+{
+  "name": "@mmuuai/cli",
+  "version": "1.0.0",
+  "description": "MMUUAI 命令行客户端：连接账号，查询与调用平台资源并保存结果",
+  "private": true,
+  "type": "module",
+  "bin": { "mmuuai": "./bin/mmuuai.mjs" },
+  "engines": { "node": ">=24.16.0" },
+  "files": ["bin", "skills", "README.md", "THIRD_PARTY_NOTICES.md"],
+  "homepage": "https://mmuu.ai/plugin"
+}
