@@ -25,7 +25,9 @@ mmuuai catalog --kind model
 mmuuai skills
 mmuuai prompts --query 剧本
 mmuuai quote mdl_REPLACE_WITH_ID --prompt "一只蓝色杯子"
-mmuuai run mdl_REPLACE_WITH_ID --prompt "一只蓝色杯子"
+# 用户批准上面的最终请求后再提交
+mmuuai create mdl_REPLACE_WITH_ID --prompt "一只蓝色杯子"
+mmuuai wait tsk_REPLACE_WITH_ID
 mmuuai task tsk_REPLACE_WITH_ID
 mmuuai result tsk_REPLACE_WITH_ID
 mmuuai call mmuu_prompts --json-file arguments.json
@@ -33,7 +35,11 @@ mmuuai call mmuu_prompts --json-file arguments.json
 
 模型和组合能力使用当前后台目录与版本，命令不硬编码模型名称或价格。由 Agent 读取配套 Skill 后按需求选择默认模型，用户指定模型时按用户选择；纯文字创作先读免费预设，由当前 Agent 写作。`quote` 只询价，不扣次数或算力。
 
-`run` 询价并提交一次，再查询同一任务、领取并自动保存结果。结果默认保存在系统下载目录的 `MMUUAI/`，平铺命名与网页下载规则相同。保存失败时完整已领取结果留在当前连接独占的私有恢复目录，重新执行同一 `result` 优先补存，不再次领取或生成；成功后清理该恢复文件。请保护恢复目录中的私人内容。
+创作方向不明确时由 Agent 先提问给出方案，方向明确后准备完整输入和报价；每次提交前展示模型池可见字段、中文名称和最终提示词，等用户确认。`quote` 返回 `confirmation`，`create` 提交已确认请求，`wait` 只等待原任务，不重新询价或创建。
+
+技能/工作流提交前让用户选择 `--workflow-mode step_by_step`（每一步查看）或 `automatic`（一次性执行完）。`wait` 遇到 `awaiting_confirmation` 返回前一步保存回执和下一步真实字段，不再轮询。用 `confirmation <taskId>` 重读清单；用户批准后执行 `confirm <taskId> --ordinal <本步序号> --confirmation-token <清单令牌>`，再 `wait <taskId>`。同一确认重发不批准后续步骤，取消仍用 `cancel`。批量步骤一次展示本步所有条目，批准覆盖本步整个批次。
+
+`run` 用于已经批准的完整请求，询价并提交一次，再查询同一任务、领取并自动保存结果。结果默认保存在系统下载目录的 `MMUUAI/`，平铺命名与网页下载规则相同。保存失败时完整已领取结果留在当前连接独占的私有恢复目录，重新执行同一 `result` 优先补存，不再次领取或生成；成功后清理该恢复文件。请保护恢复目录中的私人内容。
 
 `create` 可用 `--idempotency-key` 指定稳定幂等键；省略时生成一个并在提交前输出恢复回执。请求结果未知时保留该回执，查询原任务；不要换键重复提交。`reconciling` 保持原任务，不重新发起生成。
 

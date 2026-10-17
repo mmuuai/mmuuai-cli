@@ -9,7 +9,7 @@ var __export = (target, all) => {
 // plugins/mmuuai-cli/src/arguments.mjs
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-var strings = ["endpoint", "config-dir", "json", "json-file", "prompt", "parameters", "files", "version-id", "idempotency-key", "task-id", "resource-id", "kind", "query", "limit", "cursor", "output-dir", "timeout", "poll-interval", "parameter", "mime-type", "media-kind"];
+var strings = ["endpoint", "config-dir", "json", "json-file", "prompt", "parameters", "files", "version-id", "idempotency-key", "task-id", "resource-id", "kind", "query", "limit", "cursor", "output-dir", "timeout", "poll-interval", "parameter", "mime-type", "media-kind", "workflow-mode", "confirmation-token", "ordinal"];
 async function parseCommand(argv, { stdin = process.stdin } = {}) {
   const options = Object.fromEntries(strings.map((name) => [name, { type: "string" }]));
   for (const name of ["help", "version", "no-browser"]) options[name] = { type: "boolean" };
@@ -37,16 +37,16 @@ async function parseCommand(argv, { stdin = process.stdin } = {}) {
   if (aliases[command]) args.kind = aliases[command];
   const position = positionals[1];
   if (["create", "run", "quote"].includes(command) && position) args.resourceId = position;
-  if (["task", "cancel", "result", "references"].includes(command) && position) args.taskId = position;
+  if (["task", "cancel", "result", "references", "wait", "confirmation", "confirm"].includes(command) && position) args.taskId = position;
   if (command === "call") {
     args.tool = position;
     args.arguments = data;
   }
   if (command === "upload") args.filePath = position;
-  for (const name of ["task-id", "resource-id", "version-id", "idempotency-key", "kind", "query", "cursor", "output-dir", "parameter", "mime-type", "media-kind"]) {
+  for (const name of ["task-id", "resource-id", "version-id", "idempotency-key", "kind", "query", "cursor", "output-dir", "parameter", "mime-type", "media-kind", "workflow-mode", "confirmation-token"]) {
     if (values[name] !== void 0) args[camel(name)] = values[name];
   }
-  for (const [option, target, multiplier] of [["timeout", "timeoutMs", 1e3], ["poll-interval", "pollIntervalMs", 1e3], ["limit", "limit", 1]]) {
+  for (const [option, target, multiplier] of [["timeout", "timeoutMs", 1e3], ["poll-interval", "pollIntervalMs", 1e3], ["limit", "limit", 1], ["ordinal", "ordinal", 1]]) {
     if (values[option] !== void 0) {
       const value = Number(values[option]);
       if (!Number.isFinite(value) || value <= 0) throw failure("CLI_NUMBER_INVALID");
@@ -66,9 +66,10 @@ async function parseCommand(argv, { stdin = process.stdin } = {}) {
   }
   if (command === "call") {
     const forwarded = { ...data };
-    for (const name of ["task-id", "resource-id", "version-id", "idempotency-key", "kind", "query", "cursor", "limit", "parameter", "mime-type", "media-kind"]) {
+    for (const name of ["task-id", "resource-id", "version-id", "idempotency-key", "kind", "query", "cursor", "limit", "parameter", "mime-type", "media-kind", "workflow-mode", "confirmation-token"]) {
       if (values[name] !== void 0) forwarded[camel(name)] = args[camel(name)];
     }
+    if (values.ordinal !== void 0) forwarded.ordinal = args.ordinal;
     if (values.prompt !== void 0 || values.parameters !== void 0 || values.files !== void 0)
       forwarded.input = args.input;
     args.arguments = forwarded;
@@ -23136,7 +23137,7 @@ async function loadConnection({ endpoint, configDir, apiKey, lazy: lazy2 = false
     authProvider = binding.authProvider;
     fetchFn = binding.fetch;
   }
-  const client = new Client({ name: "MMUUAI CLI", version: "1.0.3" }, { capabilities: {} });
+  const client = new Client({ name: "MMUUAI CLI", version: "1.0.6" }, { capabilities: {} });
   let connecting, closed = false;
   const connect = () => {
     if (closed) return Promise.reject(fail3("MMUU_AUTH_CONNECTION_CLOSED"));
@@ -23603,7 +23604,23 @@ var MIME_TYPES = {
   ".webm": "video/webm",
   ".mkv": "video/x-matroska",
   ".pdf": "application/pdf",
-  ".txt": "text/plain"
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".markdown": "text/markdown",
+  ".csv": "text/csv",
+  ".tsv": "text/tab-separated-values",
+  ".json": "application/json",
+  ".jsonl": "text/plain",
+  ".xml": "application/xml",
+  ".yaml": "text/yaml",
+  ".yml": "text/yaml",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".odt": "application/vnd.oasis.opendocument.text",
+  ".ods": "application/vnd.oasis.opendocument.spreadsheet",
+  ".odp": "application/vnd.oasis.opendocument.presentation",
+  ".zip": "application/zip"
 };
 function apiOrigin(endpoint) {
   if (endpoint === void 0) return "https://api.mmuu.ai";
@@ -23695,6 +23712,40 @@ async function uploadLocalFile({
   });
 }
 
+// plugins/mmuuai-cli/src/step-confirmation.mjs
+async function readStepConfirmation(args, context) {
+  const value = unwrapToolResult(
+    await context.client.callTool({
+      name: "mmuu_get_step_confirmation",
+      arguments: { taskId: args.taskId }
+    })
+  );
+  if (!context.saveResults || !Array.isArray(value.previousResults))
+    return value;
+  const previews = [];
+  for (const result3 of value.previousResults) {
+    let saved;
+    try {
+      saved = await context.saveResults(
+        { taskId: args.taskId, result: result3 },
+        {
+          ...args.outputDir ? { outputDir: args.outputDir } : {},
+          downloadContext: { sourceName: value.previousTitle || "\u6280\u80FD\u6B65\u9AA4" }
+        }
+      );
+    } catch {
+      saved = {
+        status: "failed",
+        code: "MMUU_SAVE_STEP_PREVIEW_FAILED",
+        resultRefetchAttempted: false,
+        generationAttempted: false
+      };
+    }
+    previews.push({ text: result3.text ?? "", ...saved });
+  }
+  return { ...value, previousResults: previews };
+}
+
 // plugins/mmuuai-cli/src/task-commands.mjs
 import { randomUUID as randomUUID6 } from "node:crypto";
 import { setTimeout as delay2 } from "node:timers/promises";
@@ -23706,6 +23757,7 @@ var codeOf = (error2) => /^[A-Z][A-Z0-9_]{1,100}$/.test(error2?.code || "") ? er
 var result = (data, exitCode = 0) => ({ exitCode, data });
 function taskMetadata(task) {
   if (!record4(task) || !TASK2.test(task.id || "") || ![
+    "awaiting_confirmation",
     "queued",
     "running",
     "reconciling",
@@ -23741,7 +23793,10 @@ function createBody(args) {
   if (args.versionId !== void 0 && !/^(mdl|wfl|skl)_[A-Za-z0-9_-]{16,80}:v[1-9][0-9]*$/.test(args.versionId))
     throw fail6("MMUU_CLI_VERSION_INVALID");
   if (args.input === void 0) throw fail6("MMUU_CLI_INPUT_REQUIRED");
+  if (args.workflowMode !== void 0 && !["automatic", "step_by_step"].includes(args.workflowMode))
+    throw fail6("MMUU_CLI_WORKFLOW_MODE_INVALID");
   return {
+    ...args.workflowMode ? { workflowMode: args.workflowMode } : {},
     resourceId: args.resourceId,
     ...args.versionId ? { versionId: args.versionId } : {},
     input: args.input
@@ -23831,10 +23886,7 @@ async function sourceNameFor(client, request) {
   }
 }
 async function runTask(args, context) {
-  const now = context.now || Date.now, sleep2 = context.sleep || ((ms) => delay2(ms, void 0, { signal: context.signal }));
-  const timeoutMs = args.timeoutMs ?? 6e5, interval = args.pollIntervalMs ?? 2e3;
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(interval) || interval <= 0)
-    throw fail6("MMUU_CLI_POLL_ARGUMENTS_INVALID");
+  pollingSettings(args, context);
   const request = prepareCreation(args);
   const quote = await call(
     context.client,
@@ -23855,9 +23907,48 @@ async function runTask(args, context) {
   const sourceName = await sourceNameFor(context.client, request);
   const created = await createTaskOnce(request, context);
   if (created.exitCode) return created;
-  const taskId = created.data.taskId, deadline = now() + timeoutMs;
-  let task = created.data;
+  return waitTask(
+    { ...args, taskId: created.data.taskId },
+    context,
+    created.data,
+    sourceName
+  );
+}
+function pollingSettings(args, context) {
+  const now = context.now || Date.now, sleep2 = context.sleep || ((ms) => delay2(ms, void 0, { signal: context.signal }));
+  const timeoutMs = args.timeoutMs ?? 6e5, interval = args.pollIntervalMs ?? 2e3;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(interval) || interval <= 0)
+    throw fail6("MMUU_CLI_POLL_ARGUMENTS_INVALID");
+  return { now, sleep: sleep2, timeoutMs, interval };
+}
+async function waitTask(args, context, initialTask, sourceName) {
+  const { now, sleep: sleep2, timeoutMs, interval } = pollingSettings(args, context);
+  const taskId = taskIdOf(args), deadline = now() + timeoutMs;
+  let task = initialTask ?? taskMetadata(await call(context.client, "mmuu_get_task", { taskId }));
   for (; ; ) {
+    if (task.executionStatus === "awaiting_confirmation") {
+      try {
+        return result({
+          ...task,
+          status: "awaiting_confirmation",
+          confirmation: await readStepConfirmation(
+            { ...args, taskId },
+            context
+          ),
+          retryAttempted: false
+        });
+      } catch (error2) {
+        return result(
+          {
+            ...task,
+            status: "awaiting_confirmation",
+            code: codeOf(error2),
+            retryAttempted: false
+          },
+          2
+        );
+      }
+    }
     if (task.executionStatus === "reconciling")
       return result(
         {
@@ -23868,7 +23959,8 @@ async function runTask(args, context) {
         },
         2
       );
-    if (task.executionStatus === "succeeded" && task.deliveryStatus === "available")
+    if (task.executionStatus === "succeeded" && task.deliveryStatus === "available") {
+      sourceName ??= await sourceNameFor(context.client, task);
       return receiveResult(
         { taskId, outputDir: args.outputDir },
         {
@@ -23880,6 +23972,7 @@ async function runTask(args, context) {
           }
         }
       );
+    }
     if (["failed", "cancelled"].includes(task.executionStatus) || ["expired", "failed", "delivered"].includes(task.deliveryStatus))
       return result({ ...task, status: "stopped", retryAttempted: false }, 1);
     if (context.signal?.aborted || now() >= deadline)
@@ -23987,6 +24080,16 @@ async function dispatchCommand(command, args = {}, context = {}) {
       return createTaskOnce(args, context);
     case "run":
       return runTask(args, context);
+    case "wait":
+      return waitTask(args, context);
+    case "confirmation":
+      return result2(await readStepConfirmation({ ...args, taskId: taskIdOf(args) }, context));
+    case "confirm":
+      return result2(await call2(context.client, "mmuu_confirm_step", {
+        taskId: taskIdOf(args),
+        ordinal: args.ordinal,
+        confirmationToken: args.confirmationToken
+      }));
     case "task":
       return result2(
         taskMetadata(
@@ -24045,6 +24148,8 @@ async function dispatchCommand(command, args = {}, context = {}) {
         );
       if (args.tool === "mmuu_create_task")
         return createTaskOnce(toolArgs, context);
+      if (args.tool === "mmuu_get_step_confirmation")
+        return result2(await readStepConfirmation({ ...toolArgs, taskId: taskIdOf(toolArgs) }, context));
       return result2(await call2(context.client, args.tool, toolArgs));
     }
     default:
@@ -24222,7 +24327,7 @@ import { spawnSync } from "node:child_process";
 // plugins/mmuuai-cli/package.json
 var package_default = {
   name: "@mmuuai/cli",
-  version: "1.0.3",
+  version: "1.0.6",
   description: "MMUUAI \u547D\u4EE4\u884C\u5BA2\u6237\u7AEF\uFF1A\u8FDE\u63A5\u8D26\u53F7\uFF0C\u67E5\u8BE2\u4E0E\u8C03\u7528\u5E73\u53F0\u8D44\u6E90\u5E76\u4FDD\u5B58\u7ED3\u679C",
   private: true,
   type: "module",
@@ -24256,11 +24361,13 @@ var help = `MMUUAI CLI ${package_default.version}
   mmuuai run <resourceId> --prompt \u5185\u5BB9 [--output-dir \u76EE\u5F55]
   mmuuai create <resourceId> --json-file request.json
   mmuuai task | result | cancel | references <taskId>
+  mmuuai wait | confirmation <taskId>
+  mmuuai confirm <taskId> --ordinal 2 --confirmation-token <token>
   mmuuai upload <\u6587\u4EF6\u8DEF\u5F84> --parameter image --media-kind image --mime-type image/png
   mmuuai call <\u5DE5\u5177\u540D> --json-file arguments.json
 
 \u901A\u7528\u9009\u9879\uFF1A--json-file - \u4ECE\u6807\u51C6\u8F93\u5165\u8BFB\u53D6JSON\uFF1B--version-id\uFF1B--idempotency-key\uFF1B
---timeout \u79D2\uFF1B--config-dir \u76EE\u5F55\u3002MMUUAI_API_KEY\u73AF\u5883\u53D8\u91CF\u53EF\u7528\u4E8E\u53D7\u63A7\u811A\u672C\u3002
+--timeout \u79D2\uFF1B--workflow-mode automatic|step_by_step\uFF1B--config-dir \u76EE\u5F55\u3002MMUUAI_API_KEY\u73AF\u5883\u53D8\u91CF\u53EF\u7528\u4E8E\u53D7\u63A7\u811A\u672C\u3002
 \u5B8C\u6574\u7ED3\u679C\u9ED8\u8BA4\u4FDD\u5B58\u5230\u7CFB\u7EDF\u4E0B\u8F7D\u76EE\u5F55/MMUUAI/\uFF1B\u672A\u77E5\u6267\u884C\u72B6\u6001\u8BF7\u67E5\u8BE2\u539F\u4EFB\u52A1\uFF0C\u4E0D\u8981\u91CD\u5EFA\u3002
 `;
 var print = (data) => process.stdout.write(JSON.stringify(data) + "\n");
